@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Editores / ferramentas
+.vscode/
+.dist/
+
+# Entregas e capturas
+*.zip
+*.pcap
+*.pcapng
