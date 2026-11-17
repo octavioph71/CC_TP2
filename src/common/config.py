@@ -19,15 +19,12 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+from common.topics import is_valid_filter as _is_valid_filter  
+from common.topics import is_valid_topic as _is_valid_topic    
 
 
 class ConfigError(Exception):
     """Erro no ficheiro de configuração (inclui o número da linha, quando se aplica)."""
-
-
-# --------------------------------------------------------------------------- #
-#  Estruturas de dados
-# --------------------------------------------------------------------------- #
 
 @dataclass(frozen=True)
 class Endpoint:
@@ -68,8 +65,7 @@ class TimedAction:
     at: float
     action: str               # "subscribe" ou "unsubscribe"
     filter: str
-    qos: Optional[int]        # só em "subscribe"
-
+    qos: Optional[int]       
 
 @dataclass
 class BrokerConfig:
@@ -80,7 +76,6 @@ class BrokerConfig:
     evict_after: float
     peers: List[Endpoint] = field(default_factory=list)
 
-
 @dataclass
 class PublisherConfig:
     broker_control: Endpoint
@@ -88,7 +83,6 @@ class PublisherConfig:
     start_after: float
     drain: float
     publish: List[PublishFlow] = field(default_factory=list)
-
 
 @dataclass
 class SubscriberConfig:
@@ -99,10 +93,6 @@ class SubscriberConfig:
     at: List[TimedAction] = field(default_factory=list)
 
 
-# --------------------------------------------------------------------------- #
-#  Que chaves cada papel usa (Tabelas 4 e 5 do enunciado)
-# --------------------------------------------------------------------------- #
-
 # Chaves que aparecem exatamente uma vez
 SINGLE_KEYS: Dict[str, Tuple[str, ...]] = {
     "broker":     ("bind", "control_port", "data_port", "duration", "evict_after"),
@@ -110,7 +100,7 @@ SINGLE_KEYS: Dict[str, Tuple[str, ...]] = {
     "subscriber": ("broker_control", "log", "duration"),
 }
 
-# Chaves que aparecem zero ou mais vezes (formam uma lista, pela ordem do ficheiro)
+# Chaves que aparecem zero ou mais vezes 
 LIST_KEYS: Dict[str, Tuple[str, ...]] = {
     "broker":     ("peer",),
     "publisher":  ("publish",),
@@ -118,11 +108,6 @@ LIST_KEYS: Dict[str, Tuple[str, ...]] = {
 }
 
 ROLES = tuple(SINGLE_KEYS.keys())
-
-
-# --------------------------------------------------------------------------- #
-#  Leitura das linhas
-# --------------------------------------------------------------------------- #
 
 @dataclass(frozen=True)
 class _RawValue:
@@ -137,14 +122,14 @@ def _parse_lines(text: str) -> List[Tuple[str, _RawValue]]:
     entries: List[Tuple[str, _RawValue]] = []
 
     for lineno, raw in enumerate(text.splitlines(), start=1):
-        line = raw.split("#", 1)[0].strip()      # tira o comentário
+        line = raw.split("#", 1)[0].strip()      
         if not line:
             continue
 
         if "=" not in line:
             raise ConfigError(f"linha {lineno}: falta '=' em '{raw.strip()}'")
 
-        key, value = line.split("=", 1)          # só o primeiro '=' separa a chave
+        key, value = line.split("=", 1)        
         key = key.strip()
         tokens = value.split()
 
@@ -168,11 +153,6 @@ def _parse_lines(text: str) -> List[Tuple[str, _RawValue]]:
         entries.append((key, _RawValue(tokens[0], options, lineno)))
 
     return entries
-
-
-# --------------------------------------------------------------------------- #
-#  Conversão e validação de cada tipo de valor
-# --------------------------------------------------------------------------- #
 
 def _err(rv: _RawValue, msg: str) -> ConfigError:
     return ConfigError(f"linha {rv.lineno}: {msg}")
@@ -259,27 +239,6 @@ def _abs_path(rv: _RawValue, text: str) -> str:
     return text
 
 
-# Tópicos e filtros (enunciado, secção 3.4).
-# Nota: quando existir common/topics.py, estas duas funções passam para lá.
-
-def _is_valid_topic(topic: str) -> bool:
-    """regiao/estacao/metrica: exatamente 3 níveis, não vazios, sem '*'."""
-    levels = topic.split("/")
-    return len(levels) == 3 and all(lvl and "*" not in lvl for lvl in levels)
-
-
-def _is_valid_filter(flt: str) -> bool:
-    """Um tópico completo, ou um prefixo de 1 ou 2 níveis terminado em '/*'."""
-    if _is_valid_topic(flt):
-        return True
-    levels = flt.split("/")
-    return (
-        2 <= len(levels) <= 3
-        and levels[-1] == "*"
-        and all(lvl and "*" not in lvl for lvl in levels[:-1])
-    )
-
-
 def _topic(rv: _RawValue, text: str) -> str:
     if not _is_valid_topic(text):
         raise _err(rv, f"tópico inválido (regiao/estacao/metrica): '{text}'")
@@ -290,11 +249,6 @@ def _filter(rv: _RawValue, text: str) -> str:
     if not _is_valid_filter(text):
         raise _err(rv, f"filtro inválido: '{text}'")
     return text
-
-
-# --------------------------------------------------------------------------- #
-#  Conversão chave a chave
-# --------------------------------------------------------------------------- #
 
 def _convert(key: str, rv: _RawValue):
     """Converte o valor de uma chave para o tipo certo."""
@@ -350,12 +304,7 @@ def _convert(key: str, rv: _RawValue):
         raise _err(rv, "'at' precisa de subscribe=<filtro> qos=<n> "
                        "ou unsubscribe=<filtro>")
 
-    raise _err(rv, f"chave sem conversor: '{key}'")   # não deve acontecer
-
-
-# --------------------------------------------------------------------------- #
-#  Função pública
-# --------------------------------------------------------------------------- #
+    raise _err(rv, f"chave sem conversor: '{key}'")
 
 def load_config(path: str, role: str):
     """
@@ -388,7 +337,6 @@ def load_config(path: str, role: str):
         elif key in list_keys:
             lists[key].append(_convert(key, rv))
         else:
-            # O enunciado garante que não vêm chaves a mais; se vierem, avisa e ignora.
             print(f"[config] aviso: linha {rv.lineno}: chave '{key}' "
                   f"ignorada no papel '{role}'", file=sys.stderr)
 
