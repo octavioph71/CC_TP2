@@ -1,4 +1,4 @@
-# Especificação dos protocolos - fase 1 
+# Especificação dos protocolos
 
 SubControl (TCP, controlo) e EventCast (UDP, dados). Todos os campos são inteiros sem sinal em
 *network byte order* (big-endian), construídos e lidos byte a byte com `struct`. As fases 2 a 4
@@ -25,8 +25,8 @@ passos: `recv_exact(3)` e depois `recv_exact(LENGTH)`.
 | `0x09` | `BYE` | qualquer | `REASON u8` (0 normal · 2 erro de protocolo) |
 
 `str8` = comprimento `u8` + bytes UTF-8. `ROLE`: 1 publicador, 2 subscritor.
-`STATUS`: 0 ok · 1 papel inválido · 2 id em uso · 3 mensagem malformada · 4 tópico/filtro inválido ·
-5 tópico já pertence a outro publicador. Reservados: `0x07`/`0x08` (UNSUBSCRIBE, fase 4), `0x10–0x1F` (brokers).
+`STATUS`: 0 ok  · 2 id em uso · 3 qos inválido · 4 tópico/filtro inválido · 5 tópico já pertence a outro
+publicador (o 1 fica livre). Reservados: `0x07`/`0x08` (UNSUBSCRIBE, fase 4), `0x10–0x1F` (brokers).
 
 **Quem fala com o broker.** O `HELLO` traz o `--id` e a porta UDP do cliente. O broker responde com
 um `SESSION` de 2 B único, e é esse número que o cliente põe em cada datagrama UDP: um datagrama
@@ -48,7 +48,8 @@ cliente                                  broker
 pode ainda não ter arrancado) e desiste se o `HELLO` não tiver resposta em 5 s; o broker larga quem
 abre o TCP e não envia `HELLO` em 5 s; tipo desconhecido, corpo com tamanho errado, `UTF-8`
 inválido ou um pedido que o papel não pode fazer → `BYE(2)` e fecha-se a ligação; EOF a meio de
-uma mensagem → sessão terminada; id repetido → `HELLO_ACK(2)`.
+uma mensagem → sessão terminada; `HELLO` com papel desconhecido, porta 0 ou id vazio → `BYE(2)`;
+id repetido → `HELLO_ACK(2)`.
 
 ## 2. EventCast — sobre UDP
 
@@ -61,7 +62,7 @@ Primeiro byte comum (o tipo e a garantia partilham um byte, para poupar bytes):
      +-----------+----+---------+
 ```
 
-`TYPE`: `0x1` PUBLISH · `0x2` DELIVER (`0x3` fica para o ACK, fase 2).
+`TYPE`: `0x1` PUBLISH · `0x2` DELIVER · `0x3` ACK. O formato ACK está implementado, mas o envio, a receção funcional e as retransmissões ainda não estão integrados.
 
 **PUBLISH** (publicador → broker), cabeçalho de **11 B**:
 
@@ -86,6 +87,17 @@ Primeiro byte comum (o tipo e a garantia partilham um byte, para poupar bytes):
 | `TOPIC` | `TOP_LEN` | tópico por extenso (o subscritor escreve-o no registo e não sabe de antemão os tópicos de `north/*`) |
 | conteúdo | resto | copiado do PUBLISH |
 
+**ACK** (recetor → emissor do troço), cabeçalho fixo de **7 B**:
+
+| Campo | B | Significado |
+|---|---|---|
+| 1.º byte | 1 | `TYPE=3`, sem bit Q2 |
+| `SESSION` | 2 | sessão a que respeita a confirmação |
+| `SEQ` | 2 | sequência da transmissão confirmada |
+| `NEXT` | 2 | primeira sequência ainda não recebida em ordem |
+
+**Estado:** `eventcast.py` já codifica e descodifica ACK, mas os processos ainda não os enviam, processam nem guardam retransmissões.
+
 `SEQ` (âmbito de um troço) e `MSG_ID` (âmbito de ponta a ponta) são campos diferentes: o primeiro
 serve para detetar perdas e ordem, o segundo para identificar a publicação.
 
@@ -101,13 +113,11 @@ O recetor de cada troço (o broker para cada publicador, cada subscritor para o 
 
 | Caso | Ação |
 |---|---|
-| `s == next` | avança `next` (e continua enquanto o seguinte já estiver no conjunto) |
-| `s` à frente de `next` (menos de 32) | **buraco ou fora de ordem**: guarda `s`; `next` não avança |
-| `s` atrás de `next`, ou já no conjunto | repetido: descartado |
-| `s` a 32 ou mais à frente | fora da janela: descartado |
+| `s == next` | aceita; avança `next` (e continua enquanto o seguinte já estiver guardado) |
+| `s` até 31 posições à frente de `next`, ainda não visto | aceita (**buraco ou fora de ordem**); guarda `s`, `next` não avança |
+| qualquer outro: já visto, já passado, ou a 32 ou mais à frente | descartado |
 
-"À frente" usa aritmética de números de série (RFC 1982): `a` está à frente de `b` se
-`(a − b) mod 2¹⁶` estiver entre 1 e 2¹⁵ − 1; assim `65535 → 0` não é uma perda. Nesta fase o recetor
+A distância é `(s − next) mod 2¹⁶`, por isso `65535 → 0` não é uma perda. Nesta fase o recetor
 regista o buraco (`esperava SEQ X, chegou Y`) e entrega pela ordem de chegada; a recuperação (ACK e
 retransmissão) é a fase 2.
 
@@ -115,7 +125,7 @@ retransmissão) é a fase 2.
 
 | Processo | Estado |
 |---|---|
-| Broker | `sessions` (SESSION → papel, id, IP, porta UDP, socket TCP) · `topic_owner` (um publicador por tópico) · por publicador: `TOPIC_ID → (tópico, qos)` e o `next` esperado · `SubscriptionTable` (filtro → {sessão → qos}) · por subscritor: próximo `SEQ` |
+| Broker | `SessionStore` (`broker/sessions.py`): `sessions` (SESSION → papel, id, IP, porta UDP, socket TCP) · `topic_owner` (um publicador por tópico) · por publicador: `TOPIC_ID → (tópico, qos)` e o `next` esperado · `SubscriptionTable` (filtro → {sessão → qos}) · por subscritor: próximo `SEQ` |
 | Publicador | `SESSION`, endereço de dados do broker, `TOPIC_ID` de cada fluxo, próximo `SEQ` |
 | Subscritor | `SESSION`, `next` esperado |
 
@@ -151,5 +161,5 @@ Em bytes — `HELLO` de `pub1` (11 B): `01 00 08 | 01 | 9C 41 | 04 70 75 62 31`
 
 ## 6. Fica para as fases seguintes
 
-Fase 2: ACK, retransmissão e temporizadores, expulsão por `evict_after`. Fase 3: eliminação de
+Fase 2: integrar o ACK já codificado, retransmissão e temporizadores, expulsão por `evict_after`. Fase 3: eliminação de
 duplicados em G2. Fase 4: `UNSUBSCRIBE`, ações `at` e brokers vizinhos.

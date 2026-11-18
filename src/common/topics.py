@@ -7,8 +7,6 @@ três filtros: r/s/m, r/s/* e r/*. A tabela aproveita isso: para encontrar os in
 faz 3 consultas a um dicionário, em vez de percorrer todas as subscrições.
 """
 
-from __future__ import annotations
-
 from typing import Dict, Set, Tuple
 
 

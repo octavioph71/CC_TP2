@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from common.seq import DUP, FAR, NEW, SeqTracker
+from common.seq import SeqTracker
 from common.topics import SubscriptionTable
 from protocol import eventcast as ec
 from protocol import subcontrol as sc
@@ -44,6 +44,10 @@ p = ec.Publish(1, 0, 1, 1, 1, b"23.5")
 d = ec.Deliver(2, 0, 1, "north/station7/temperature", 2, b"23.5")
 check("ida e volta", ec.decode(ec.encode(p)) == p and ec.decode(ec.encode(d)) == d)
 check("PUBLISH = 11 B + conteúdo", len(ec.encode(p)) == 15)
+a = ec.Ack(2, 42, 43)
+check("ACK recuperado: 7 B e ida e volta", len(ec.encode(a)) == 7 and ec.decode(ec.encode(a)) == a)
+check("ACK truncado ou longo rejeitado", all(lanca(ec.DecodeError, ec.decode, ec.encode(a)[:n]) for n in range(7))
+      and lanca(ec.DecodeError, ec.decode, ec.encode(a) + b"X"))
 check("primeiro byte: TYPE e Q2", ec.encode(p)[0] == 0x10 and ec.encode(d)[0] == 0x28)
 check("todos os truncamentos do cabeçalho rejeitados",
       all(lanca(ec.DecodeError, ec.decode, ec.encode(p)[:n]) for n in range(11))
@@ -51,14 +55,28 @@ check("todos os truncamentos do cabeçalho rejeitados",
 check("datagrama vazio e TYPE desconhecido", lanca(ec.DecodeError, ec.decode, b"")
       and lanca(ec.DecodeError, ec.decode, b"\xf0" + bytes(10)))
 
+print("[Estado do broker]")
+from broker.sessions import SessionStore
+store = SessionStore()
+hello = sc.Hello(sc.ROLE_PUBLISHER, 42001, "pub1")
+obj = object()
+sess = store.create(hello, "127.0.0.1", obj)
+check("cria sessão, não duplica ID", sess is not None and store.create(hello, "127.0.0.1", obj) is None)
+check("regista tópico e reutiliza o mesmo ID", store.register(sess, sc.Register(1, "north/station7/temperature")).topic_id == 1
+      and store.register(sess, sc.Register(1, "north/station7/temperature")).topic_id == 1)
+check("identifica publicador UDP pela sessão/IP/tópico", store.publisher(ec.Publish(sess.sid, 0, 1, 1, 1, b""), "127.0.0.1") is sess
+      and store.publisher(ec.Publish(sess.sid, 0, 1, 1, 1, b""), "127.0.0.2") is None)
+store.remove(sess)
+check("remove sessão e liberta identificação", store.create(hello, "127.0.0.1", obj) is not None)
+
 print("[SEQ esperado]")
 t = SeqTracker()
-check("0 e 1 por ordem", t.receive(0) == NEW and t.receive(1) == NEW and t.next == 2)
-check("3 antes do 2: buraco, next fica em 2", t.receive(3) == NEW and t.next == 2)
-check("2 fecha o buraco: next passa a 4", t.receive(2) == NEW and t.next == 4)
-check("repetido e fora da janela", t.receive(1) == DUP and t.receive(4 + 1000) == FAR)
+check("0 e 1 por ordem", t.receive(0) and t.receive(1) and t.next == 2)
+check("3 antes do 2: buraco, next fica em 2", t.receive(3) and t.next == 2)
+check("2 fecha o buraco: next passa a 4", t.receive(2) and t.next == 4)
+check("repetido e fora da janela", not t.receive(1) and not t.receive(4 + 1000))
 t = SeqTracker(); t.next = 65535
-check("dá a volta a 65535 -> 0", t.receive(65535) == NEW and t.next == 0 and t.receive(0) == NEW)
+check("dá a volta a 65535 -> 0", t.receive(65535) and t.next == 0 and t.receive(0))
 
 print("[Subscrições]")
 tab = SubscriptionTable()

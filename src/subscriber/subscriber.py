@@ -4,7 +4,7 @@ import time
 
 from common.client import SessionError, open_session
 from common.log import EventLog
-from common.seq import NEW, SeqTracker
+from common.seq import SeqTracker
 from protocol import eventcast as ec
 from protocol import subcontrol as sc
 
@@ -61,7 +61,7 @@ def run(node_id, cfg, stop):
                 continue                                   
 
             expected = tracker.next
-            if tracker.receive(msg.seq) != NEW:
+            if not tracker.receive(msg.seq):
                 print(f"[{node_id}] SEQ {msg.seq} repetido ou fora da janela: descartado", flush=True)
                 continue
             if msg.seq != expected:

@@ -1,5 +1,6 @@
 """
-EventCast — plano de dados, sobre UDP (doc/protocolos.md, secção 3). Fase 1.
+EventCast — plano de dados, sobre UDP (doc/protocolos.md, secção 3).
+A estrutura ACK foi reposta para a Fase 2, mas ainda não é utilizada pelos processos.
 
 Primeiro byte, comum aos datagramas:
 
@@ -12,18 +13,18 @@ Primeiro byte, comum aos datagramas:
         1.º byte · SESSION u16 · SEQ u16 · MSG_ID u32 · TOPIC_ID u16 · PAYLOAD
     DELIVER (broker -> sub), 10 B + tópico + conteúdo:
         1.º byte · SESSION u16 · SEQ u16 · MSG_ID u32 · TOP_LEN u8 · TOPIC · PAYLOAD
+    ACK (recetor -> emissor), 7 B:
+        1.º byte · SESSION u16 · SEQ u16 · NEXT u16
 
 Não há campo LENGTH: o UDP preserva os limites do datagrama, por isso o conteúdo é o que
 sobra depois da parte fixa. Um datagrama inválido lança DecodeError e quem recebe descarta-o.
 """
 
-from __future__ import annotations
-
 import struct
 from dataclasses import dataclass
 from typing import Union
 
-T_PUBLISH, T_DELIVER = 0x1, 0x2
+T_PUBLISH, T_DELIVER, T_ACK = 0x1, 0x2, 0x3
 Q2_BIT = 0x08
 
 MAX_DATAGRAM = 1200            
@@ -31,6 +32,7 @@ RECV_BUFSIZE = 65535
 
 _PUBLISH_HDR = struct.Struct("!BHHIH")     # 11 Bytes
 _DELIVER_HDR = struct.Struct("!BHHIB")     # 10 Bytes
+_ACK_HDR = struct.Struct("!BHHH")          # 7 Bytes
 
 
 class DecodeError(Exception):
@@ -56,7 +58,14 @@ class Deliver:
     payload: bytes
 
 
-Datagram = Union[Publish, Deliver]
+@dataclass(frozen=True)
+class Ack:
+    session: int
+    seq: int
+    next: int
+
+
+Datagram = Union[Publish, Deliver, Ack]
 
 def _first_byte(msg_type: int, qos: int) -> int:
     if qos not in (1, 2):
@@ -74,6 +83,8 @@ def encode(msg: Datagram) -> bytes:
             raise ValueError("tópico com mais de 255 bytes")
         data = _DELIVER_HDR.pack(_first_byte(T_DELIVER, msg.qos), msg.session, msg.seq,
                                  msg.msg_id, len(topic)) + topic + msg.payload
+    elif isinstance(msg, Ack):
+        data = _ACK_HDR.pack(T_ACK << 4, msg.session, msg.seq, msg.next)
     else:
         raise TypeError(f"não é um datagrama EventCast: {msg!r}")
     if len(data) > MAX_DATAGRAM:
@@ -87,6 +98,12 @@ def decode(data: bytes) -> Datagram:
         raise DecodeError("datagrama vazio")
     msg_type = data[0] >> 4
     qos = 2 if data[0] & Q2_BIT else 1
+
+    if msg_type == T_ACK:
+        if len(data) != _ACK_HDR.size or data[0] != (T_ACK << 4):
+            raise DecodeError(f"ACK inválido: {len(data)} B")
+        _, session, seq, nxt = _ACK_HDR.unpack(data)
+        return Ack(session, seq, nxt)
 
     if msg_type == T_PUBLISH:
         if len(data) < _PUBLISH_HDR.size:
