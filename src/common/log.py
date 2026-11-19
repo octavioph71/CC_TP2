@@ -48,10 +48,8 @@ class EventLog:
         line = f"{now_ms()} {self._node_id} {topic} {message_id}\n"
         with self._lock:
             if self._file.closed:
-                return                      # a terminar: ignora escritas tardias
+                return                   
             self._file.write(line)
-            # flush entrega a linha ao SO; a partir daí sobrevive a um SIGKILL
-            # do processo (só se perderia se a máquina inteira fosse abaixo).
             self._file.flush()
 
     def close(self) -> None:

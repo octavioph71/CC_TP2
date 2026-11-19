@@ -82,9 +82,6 @@ class Bye:
 
 Message = Union[Hello, HelloAck, Register, RegisterAck, Subscribe, SubAck, Bye]
 
-
-# ---------------------------------------------------------------- pequenas ajudas
-
 def _u16(n):
     """Número -> 2 bytes (big-endian)."""
     return n.to_bytes(2, "big")
@@ -114,13 +111,9 @@ def _str8_at(body, pos):
     except UnicodeDecodeError:
         raise ProtocolError("cadeia com UTF-8 inválido") from None
 
-
 def _expect_len(body, n):
     if len(body) != n:
         raise ProtocolError(f"corpo com {len(body)} B (esperava {n} B)")
-
-
-# ---------------------------------------------------------------- codificar
 
 def encode(msg):
     if isinstance(msg, Hello):
@@ -148,25 +141,22 @@ def encode(msg):
         raise TypeError(f"não é uma mensagem SubControl: {msg!r}")
     return bytes([msg_type]) + _u16(len(body)) + body
 
-
-# ---------------------------------------------------------------- descodificar
-
 def decode(msg_type, body):
     """Interpreta o corpo de uma mensagem já delimitada. Só verifica a estrutura."""
     if msg_type == T_HELLO:
-        node_id = _str8_at(body, 3)                      # ROLE (1) + UDP_PORT (2), depois o ID
+        node_id = _str8_at(body, 3)                    
         return Hello(role=body[0], udp_port=_u16_at(body, 1), node_id=node_id)
     if msg_type == T_HELLO_ACK:
         _expect_len(body, 5)
         return HelloAck(status=body[0], data_port=_u16_at(body, 1), session=_u16_at(body, 3))
     if msg_type == T_REGISTER:
-        topic = _str8_at(body, 1)                        # QOS (1), depois o tópico
+        topic = _str8_at(body, 1)                       
         return Register(qos=body[0], topic=topic)
     if msg_type == T_REGISTER_ACK:
         _expect_len(body, 3)
         return RegisterAck(status=body[0], topic_id=_u16_at(body, 1))
     if msg_type == T_SUBSCRIBE:
-        filtro = _str8_at(body, 1)                       # QOS (1), depois o filtro
+        filtro = _str8_at(body, 1)                      
         return Subscribe(qos=body[0], filter=filtro)
     if msg_type == T_SUB_ACK:
         _expect_len(body, 1)
