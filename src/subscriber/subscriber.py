@@ -9,7 +9,7 @@ from protocol import eventcast as ec
 from protocol import subcontrol as sc
 
 """
-Subscritor, fase 1: abre a sessão TCP, subscreve os filtros do arranque, recebe DELIVER por UDP e escreve uma linha no registo por publicação entregue.
+abre a sessão TCP, subscreve os filtros do arranque, recebe DELIVER por UDP e escreve uma linha no registo por publicação entregue.
 """
 
 def subscribe(sock, subs):
